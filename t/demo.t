@@ -41,6 +41,7 @@ my $exception = dies {
 };
 like $exception, qr/My exception/, 'An exception was the expected result';
 
+local $Data::Dumper::Sortkeys = 1;
 diag Dumper( MyDemo::get_tracer() );
 
 done_testing;
