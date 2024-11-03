@@ -8,6 +8,7 @@ use Syntax::Keyword::Dynamically;
 use OpenTelemetry;
 use Attribute::Handlers;
 use Sub::Util ();
+use Keyword::Declare;
 
 sub import ( $class, @args ) {
 	my %options = (
@@ -36,6 +37,10 @@ sub import ( $class, @args ) {
 		'$span'    => \$span,
 		span       => \&span,
 	);
+	
+	keyword Span ( Ident $name, Block $code ) {{{
+		span(qq{«$name»}, sub { «$code» });
+	}}}
 	
 	# This part is unfortunately not lexical, nor pretty.
 	# And yes, it really does need the stringy eval.
