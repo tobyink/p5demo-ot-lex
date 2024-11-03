@@ -6,6 +6,8 @@ use builtin qw( true false export_lexically );
 use Syntax::Keyword::Dynamically;
 
 use OpenTelemetry;
+use Attribute::Handlers;
+use Sub::Util ();
 
 sub import ( $class, @args ) {
 	my %options = (
@@ -34,6 +36,28 @@ sub import ( $class, @args ) {
 		'$span'    => \$span,
 		span       => \&span,
 	);
+	
+	# This part is unfortunately not lexical, nor pretty.
+	# And yes, it really does need the stringy eval.
+	no strict 'refs';
+	no warnings 'redefine';
+	my $caller = caller;
+	eval q{
+		sub }.$caller.q{::Span :ATTR(CODE,RAWDATA) ( $package, $symbol, $referent, $attr, $data, $phase, $filename, $linenum ) {
+			my $subname = sprintf '%s::%s', *{$symbol}{PACKAGE}, *{$symbol}{NAME};
+			my $code    = *{$symbol}{CODE};
+			my $replacement = sub ( @args ) {
+				$tracer->in_span( $data || $subname, sub ( $new_span, $new_context ) {
+					dynamically $span = $new_span;
+					dynamically $context = $new_context;
+					return $code->( @args );
+				} );
+			};
+			*{$subname} = Sub::Util::set_subname($subname, $replacement);
+		}
+		
+		1;
+	} or die $@;
 }
 
 1;
@@ -42,18 +66,17 @@ sub import ( $class, @args ) {
 
   package Your::Module;
   
-  # Exports $tracer, $context, $span, and &span.
-  use OpenTelemetry::Lex ( %options_for_tracer );
+  # Exports $tracer, $context, $span, span, and :Span.
+  use OpenTelemetry::Lex sub {
+    my $p = OpenTelemetry->tracer_provider;
+    return ( tracer => $p->tracer( name => 'my_app', version => '1.0' ) );
+  };
   
-  sub thingy ( $foo, $bar ) {
+  sub thingy :Span(outer) ( $foo, $bar ) {
     
-    span %options_for_span, sub {
-      
-      $span->add_message( "Foo is $foo" );
-      
-      span %options_for_inner_span, sub {
-        
-        $span->add_message( "Bar is $bar" );
-      };
+    $span->add_event( name => 'inside_outer' );
+    
+    span inner => sub {
+      $span->add_event( name => 'inside inner' );
     };
   }
